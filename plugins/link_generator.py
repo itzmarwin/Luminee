@@ -9,117 +9,135 @@ import asyncio
 user_batch_sessions = {}
 
 @Bot.on_message(filters.private & filters.user(ADMINS) & filters.command('batch'))
-async def batch(client: Client, message: Message):
+async def batch_command(client: Client, message: Message):
     user_id = message.from_user.id
+    # Start new session
     user_batch_sessions[user_id] = {
-        'message_ids': [],
-        'session_active': True
+        'messages': [],
+        'waiting_for_message': True,
+        'session_msg_id': None
     }
-    await start_batch_session(client, message)
-
-async def start_batch_session(client, message):
-    user_id = message.from_user.id
-    session = user_batch_sessions.get(user_id)
     
-    if not session or not session['session_active']:
-        await message.reply("Session expired! Start a new batch with /batch")
+    # Ask for first message
+    prompt = await message.reply(
+        "📦 <b>Batch Session Started</b>\n\n"
+        "Please forward the first message from your DB channel or send the DB Channel Post Link",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_batch")]])
+    )
+    
+    # Store the prompt message ID
+    user_batch_sessions[user_id]['session_msg_id'] = prompt.id
+
+@Bot.on_message(filters.private & filters.user(ADMINS) & 
+                ~filters.command(['start','users','broadcast','batch','genlink','stats']))
+async def handle_batch_message(client: Client, message: Message):
+    user_id = message.from_user.id
+    if user_id not in user_batch_sessions:
         return
         
-    stored_count = len(session['message_ids'])
-    text = f"📦 Batch Session\n\nStored Messages: {stored_count}\n\nPlease click your preferred button"
+    session = user_batch_sessions[user_id]
+    
+    if not session.get('waiting_for_message'):
+        return
+    
+    # Get message ID from forwarded message or link
+    msg_id = await get_message_id(client, message)
+    if not msg_id:
+        await message.reply("❌ Error: Not a valid message from DB Channel. Please try again.")
+        return
+    
+    # Store obfuscated message ID
+    obfuscated_id = msg_id * abs(client.db_channel.id)
+    session['messages'].append(obfuscated_id)
+    session['waiting_for_message'] = False
+    
+    # Show batch menu
+    await show_batch_menu(client, user_id, "✅ Message added to batch!")
+
+async def show_batch_menu(client: Client, user_id: int, status: str = ""):
+    if user_id not in user_batch_sessions:
+        return
+        
+    session = user_batch_sessions[user_id]
+    count = len(session['messages'])
+    
+    text = (
+        f"📦 <b>Batch Session</b>\n\n"
+        f"{status}\n"
+        f"Stored Messages: {count}\n\n"
+        "Please click your preferred button:"
+    )
     
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ Add More", callback_data="add_more")],
-        [InlineKeyboardButton("🔗 Generate Link", callback_data="generate_link")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_batch")]
+        [InlineKeyboardButton("➕ Add More Messages", callback_data="add_more")],
+        [InlineKeyboardButton("🔗 Generate Batch Link", callback_data="generate_batch")],
+        [InlineKeyboardButton("❌ End Session", callback_data="cancel_batch")]
     ])
     
-    if 'session_msg_id' not in session:
-        msg = await message.reply_text(text, reply_markup=keyboard)
-        session['session_msg_id'] = msg.id
-    else:
-        try:
+    try:
+        if session['session_msg_id']:
             await client.edit_message_text(
                 chat_id=user_id,
                 message_id=session['session_msg_id'],
                 text=text,
                 reply_markup=keyboard
             )
-        except:
-            # Message might be deleted, create new one
-            msg = await message.reply_text(text, reply_markup=keyboard)
-            session['session_msg_id'] = msg.id
+    except:
+        # If message doesn't exist, create a new one
+        msg = await client.send_message(
+            chat_id=user_id,
+            text=text,
+            reply_markup=keyboard
+        )
+        session['session_msg_id'] = msg.id
 
 @Bot.on_callback_query(filters.regex(r'^add_more$'))
 async def add_more_callback(client: Client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
-    session = user_batch_sessions.get(user_id)
-    
-    if not session or not session['session_active']:
+    if user_id not in user_batch_sessions:
         await callback_query.answer("Session expired! Start a new batch with /batch")
         return
         
-    await callback_query.answer()
+    session = user_batch_sessions[user_id]
+    session['waiting_for_message'] = True
     
-    # Ask user to send next message
-    prompt = await client.send_message(
-        chat_id=user_id,
-        text="Please forward a message from your DB channel or send a DB Channel Post Link"
-    )
+    await callback_query.answer("Please send next message...")
     
-    # Store the prompt message ID
-    session['prompt_msg_id'] = prompt.id
+    # Update menu message to show we're waiting for input
+    try:
+        await client.edit_message_text(
+            chat_id=user_id,
+            message_id=session['session_msg_id'],
+            text=(
+                "📦 <b>Batch Session</b>\n\n"
+                "Waiting for your next message...\n"
+                f"Stored Messages: {len(session['messages']}\n\n"
+                "Please forward a message from your DB channel or send a DB Channel Post Link"
+            ),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_batch")]])
+        )
+    except:
+        pass
 
-@Bot.on_message(filters.private & filters.user(ADMINS) & 
-                ~filters.command(['start','users','broadcast','batch','genlink','stats']))
-async def handle_batch_message(client: Client, message: Message):
-    user_id = message.from_user.id
-    session = user_batch_sessions.get(user_id)
-    
-    if not session or not session['session_active']:
-        return
-        
-    # Check if this is a response to our "add more" prompt
-    if 'prompt_msg_id' in session and message.reply_to_message_id == session['prompt_msg_id']:
-        msg_id = await get_message_id(client, message)
-        if msg_id:
-            # Store the obfuscated message ID
-            obfuscated_id = msg_id * abs(client.db_channel.id)
-            session['message_ids'].append(obfuscated_id)
-            
-            # Delete the prompt message
-            try:
-                await client.delete_messages(user_id, session['prompt_msg_id'])
-            except:
-                pass
-            del session['prompt_msg_id']
-            
-            # Update batch session
-            await start_batch_session(client, message)
-        else:
-            await message.reply("❌ Error: Not a valid message from DB Channel")
-            await start_batch_session(client, message)
-
-@Bot.on_callback_query(filters.regex(r'^generate_link$'))
-async def generate_link_callback(client: Client, callback_query: CallbackQuery):
+@Bot.on_callback_query(filters.regex(r'^generate_batch$'))
+async def generate_batch_callback(client: Client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
-    session = user_batch_sessions.get(user_id)
-    
-    if not session or not session['session_active']:
+    if user_id not in user_batch_sessions:
         await callback_query.answer("Session expired! Start a new batch with /batch")
         return
         
-    message_ids = session['message_ids']
+    session = user_batch_sessions[user_id]
+    messages = session['messages']
     
-    if not message_ids:
+    if not messages:
         await callback_query.answer("No messages added yet!", show_alert=True)
         return
     
     # Create batch string
-    if len(message_ids) == 1:
-        string = f"get-{message_ids[0]}"
+    if len(messages) == 1:
+        string = f"get-{messages[0]}"
     else:
-        string = f"batch-{'-'.join(str(msg_id) for msg_id in message_ids)}"
+        string = f"batch-{'-'.join(str(msg_id) for msg_id in messages)}"
     
     base64_string = await encode(string)
     link = f"https://t.me/{client.username}?start={base64_string}"
@@ -132,30 +150,25 @@ async def generate_link_callback(client: Client, callback_query: CallbackQuery):
     
     # Send final link
     await callback_query.message.edit_text(
-        f"<b>✅ Batch Link Created</b>\n\n{link}\n\n"
-        f"Total Messages: {len(message_ids)}",
+        f"<b>✅ Batch Link Created</b>\n\n"
+        f"{link}\n\n"
+        f"Total Messages: {len(messages)}",
         reply_markup=reply_markup
     )
     
     # Clear session
-    session['session_active'] = False
+    del user_batch_sessions[user_id]
 
 @Bot.on_callback_query(filters.regex(r'^cancel_batch$'))
 async def cancel_batch_callback(client: Client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
     if user_id in user_batch_sessions:
-        session = user_batch_sessions[user_id]
-        session['session_active'] = False
-        
-        try:
-            await client.delete_messages(user_id, session['session_msg_id'])
-        except:
-            pass
-        
+        del user_batch_sessions[user_id]
+    
     await callback_query.message.edit_text("❌ Batch session cancelled")
 
 @Bot.on_callback_query(filters.regex(r'^new_batch$'))
 async def new_batch_callback(client: Client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
     await callback_query.answer("Starting new batch...")
-    await batch.__call__(client, callback_query.message)
+    await batch_command(client, callback_query.message)
