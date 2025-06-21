@@ -111,7 +111,7 @@ async def add_more_callback(client: Client, callback_query: CallbackQuery):
             text=(
                 "📦 <b>Batch Session</b>\n\n"
                 "Waiting for your next message...\n"
-                f"Stored Messages: {len(session['messages']}\n\n"
+                f"Stored Messages: {len(session['messages'])}\n\n"
                 "Please forward a message from your DB channel or send a DB Channel Post Link"
             ),
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_batch")]])
