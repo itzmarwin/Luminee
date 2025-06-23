@@ -266,8 +266,14 @@ REPLY_ERROR = "<code>Use this command as a replay to any telegram message with o
 #=====================================================================================##
 
 
+from config import FORCE_SUB_CHANNELS  # Make sure to import FORCE_SUB_CHANNELS
+
 @Bot.on_message(filters.command('start') & filters.private)
 async def not_joined(client: Client, message: Message):
+    # Only show buttons if force sub channels are configured
+    if not FORCE_SUB_CHANNELS:
+        return await start_command(client, message)
+    
     # Create buttons for all force sub channels
     buttons = []
     channel_list = []
@@ -275,14 +281,17 @@ async def not_joined(client: Client, message: Message):
     # Get force sub channels from bot instance
     force_subs = getattr(client, 'force_subs', {})
     
+    if not force_subs:
+        return await message.reply("❌ Force sub channels not configured properly")
+    
     # Create buttons in groups of 2
-    channel_buttons = []
+    row_buttons = []
     for i, (channel_id, channel_info) in enumerate(force_subs.items()):
         # Add channel to list for message text
         channel_list.append(f"• {channel_info['title']}")
         
         # Create button for this channel
-        channel_buttons.append(
+        row_buttons.append(
             InlineKeyboardButton(
                 f"📢 {channel_info['title']}",
                 url=channel_info['link']
@@ -290,9 +299,9 @@ async def not_joined(client: Client, message: Message):
         )
         
         # Create new row after every 2 buttons
-        if len(channel_buttons) == 2 or i == len(force_subs) - 1:
-            buttons.append(channel_buttons)
-            channel_buttons = []
+        if len(row_buttons) == 2 or i == len(force_subs) - 1:
+            buttons.append(row_buttons)
+            row_buttons = []
     
     # Add Try Again button
     try:
@@ -304,7 +313,7 @@ async def not_joined(client: Client, message: Message):
     buttons.append([InlineKeyboardButton("🔄 Try Again", url=try_again_link)])
 
     # Format the message with all channel names
-    channels_text = "\n".join(channel_list) if channel_list else "the required channels"
+    channels_text = "\n".join(channel_list)
     
     await message.reply(
         text=(
