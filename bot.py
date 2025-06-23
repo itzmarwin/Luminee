@@ -1,5 +1,6 @@
 from aiohttp import web
 from plugins import web_server
+from config import FORCE_SUB_CHANNELS 
 
 import pyromod.listen
 from pyrogram import Client
