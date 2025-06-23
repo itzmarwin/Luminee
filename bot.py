@@ -1,6 +1,6 @@
 from aiohttp import web
 from plugins import web_server
-from config import FORCE_SUB_CHANNELS 
+from config import FORCE_SUB_CHANNELS, JOIN_REQUEST_ENABLE  # Added JOIN_REQUEST_ENABLE
 
 import pyromod.listen
 from pyrogram import Client
@@ -11,7 +11,7 @@ import time
 import asyncio
 import logging
 
-from config import API_HASH, APP_ID, LOGGER, TG_BOT_TOKEN, TG_BOT_WORKERS, FORCE_SUB_CHANNELS, CHANNEL_ID, PORT
+from config import API_HASH, APP_ID, LOGGER, TG_BOT_TOKEN, TG_BOT_WORKERS, FORCE_SUB_CHANNELS, CHANNEL_ID, PORT, JOIN_REQUEST_ENABLE  # Added JOIN_REQUEST_ENABLE
 
 ascii_art = """
 ░█████╗░░█████╗░██████╗░███████╗██╗░░██╗██████╗░░█████╗░████████╗███████╗
@@ -86,13 +86,28 @@ class Bot(Client):
                     try:
                         chat = await self.get_chat(channel_id)
                         
-                        # Try to get or create invite link
-                        try:
-                            link = chat.invite_link
-                            if not link:
-                                link = await self.export_chat_invite_link(channel_id)
-                        except:
-                            link = None
+                        # Generate appropriate invite link based on join request setting
+                        if JOIN_REQUEST_ENABLE:
+                            try:
+                                # Create join request link
+                                invite = await self.create_chat_invite_link(
+                                    chat_id=channel_id,
+                                    creates_join_request=True
+                                )
+                                link = invite.invite_link
+                                self.LOGGER(__name__).info(f"Created join request link for {channel_id}")
+                            except Exception as e:
+                                self.LOGGER(__name__).error(f"Failed to create join request link: {e}")
+                                link = None
+                        else:
+                            try:
+                                # Get or create regular invite link
+                                link = chat.invite_link
+                                if not link:
+                                    link = await self.export_chat_invite_link(channel_id)
+                            except Exception as e:
+                                self.LOGGER(__name__).error(f"Failed to get invite link: {e}")
+                                link = None
                         
                         if link:
                             self.force_subs[channel_id] = {
@@ -124,6 +139,12 @@ class Bot(Client):
                  for channel_id, info in self.force_subs.items()]
             )
             self.LOGGER(__name__).info(f"🔒 Force Sub Enabled for {len(FORCE_SUB_CHANNELS)} channels:\n{channel_list}")
+        
+        # Log join request status
+        if JOIN_REQUEST_ENABLE:
+            self.LOGGER(__name__).info("🛡️ Join Request System: ENABLED")
+        else:
+            self.LOGGER(__name__).info("🔓 Join Request System: DISABLED")
         
         print(ascii_art)
         print("""🚀 Welcome to File Sharing Bot""")
