@@ -6,7 +6,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated
 
 from bot import Bot
-from config import ADMINS, FORCE_MSG, START_MSG, CUSTOM_CAPTION, DISABLE_CHANNEL_BUTTON, PROTECT_CONTENT, START_PIC, AUTO_DELETE_TIME, AUTO_DELETE_MSG, JOIN_REQUEST_ENABLE, FORCE_SUB_CHANNEL
+from config import ADMINS, FORCE_MSG, START_MSG, CUSTOM_CAPTION, DISABLE_CHANNEL_BUTTON, PROTECT_CONTENT, START_PIC, AUTO_DELETE_TIME, AUTO_DELETE_MSG, JOIN_REQUEST_ENABLE, FORCE_SUB_CHANNELS
 from helper_func import subscribed, decode, get_messages, delete_file
 from database.database import add_user, del_user, full_userbase, present_user
 
@@ -268,40 +268,50 @@ REPLY_ERROR = "<code>Use this command as a replay to any telegram message with o
 
 @Bot.on_message(filters.command('start') & filters.private)
 async def not_joined(client: Client, message: Message):
-    if bool(JOIN_REQUEST_ENABLE):
-        invite = await client.create_chat_invite_link(
-            chat_id=FORCE_SUB_CHANNEL,
-            creates_join_request=True
+    # Create buttons for all force sub channels
+    buttons = []
+    channel_list = []
+    
+    # Get force sub channels from bot instance
+    force_subs = getattr(client, 'force_subs', {})
+    
+    # Create buttons in groups of 2
+    channel_buttons = []
+    for i, (channel_id, channel_info) in enumerate(force_subs.items()):
+        # Add channel to list for message text
+        channel_list.append(f"• {channel_info['title']}")
+        
+        # Create button for this channel
+        channel_buttons.append(
+            InlineKeyboardButton(
+                f"📢 {channel_info['title']}",
+                url=channel_info['link']
+            )
         )
-        ButtonUrl = invite.invite_link
-    else:
-        ButtonUrl = client.invitelink
-
-    buttons = [
-        [
-            InlineKeyboardButton("Join Channel", url=ButtonUrl)
-        ]
-    ]
-
+        
+        # Create new row after every 2 buttons
+        if len(channel_buttons) == 2 or i == len(force_subs) - 1:
+            buttons.append(channel_buttons)
+            channel_buttons = []
+    
+    # Add Try Again button
     try:
-        buttons.append(
-            [
-                InlineKeyboardButton(
-                    text='Try Again',
-                    url=f"https://t.me/{client.username}?start={message.command[1]}"
-                )
-            ]
-        )
+        start_param = message.command[1]
+        try_again_link = f"https://t.me/{client.username}?start={start_param}"
     except IndexError:
-        pass
+        try_again_link = f"https://t.me/{client.username}"
+    
+    buttons.append([InlineKeyboardButton("🔄 Try Again", url=try_again_link)])
 
+    # Format the message with all channel names
+    channels_text = "\n".join(channel_list) if channel_list else "the required channels"
+    
     await message.reply(
-        text=FORCE_MSG.format(
-            first=message.from_user.first_name,
-            last=message.from_user.last_name,
-            username=None if not message.from_user.username else '@' + message.from_user.username,
-            mention=message.from_user.mention,
-            id=message.from_user.id
+        text=(
+            f"Hello {message.from_user.mention}!\n\n"
+            "📢 **You need to join these channels to use me:**\n"
+            f"{channels_text}\n\n"
+            "Please join all channels and then try again."
         ),
         reply_markup=InlineKeyboardMarkup(buttons),
         quote=True,
