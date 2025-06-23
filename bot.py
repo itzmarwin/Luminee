@@ -6,11 +6,11 @@ from pyrogram import Client
 from pyrogram.enums import ParseMode
 import sys
 from datetime import datetime
-import time  # Added import
-import asyncio  # Added import
+import time
+import asyncio
+import logging
 
 from config import API_HASH, APP_ID, LOGGER, TG_BOT_TOKEN, TG_BOT_WORKERS, FORCE_SUB_CHANNEL, CHANNEL_ID, PORT
-
 
 ascii_art = """
 ░█████╗░░█████╗░██████╗░███████╗██╗░░██╗██████╗░░█████╗░████████╗███████╗
@@ -40,28 +40,13 @@ class Bot(Client):
         usr_bot_me = await self.get_me()
         self.uptime = datetime.now()
 
-        # Force sub channel handling
-        if FORCE_SUB_CHANNEL:
-            try:
-                link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
-                if not link:
-                    await self.export_chat_invite_link(FORCE_SUB_CHANNEL)
-                    link = (await self.get_chat(FORCE_SUB_CHANNEL)).invite_link
-                self.invitelink = link
-            except Exception as a:
-                self.LOGGER(__name__).warning(a)
-                self.LOGGER(__name__).warning("Bot can't Export Invite link from Force Sub Channel!")
-                self.LOGGER(__name__).warning(f"Please Double check the FORCE_SUB_CHANNEL value and Make sure Bot is Admin in channel with Invite Users via Link Permission, Current Force Sub Channel Value: {FORCE_SUB_CHANNEL}")
-                self.LOGGER(__name__).info("\nBot Stopped. Join https://t.me/CodeXBotzSupport for support")
-                sys.exit()
-
         # DB Channel access with 2-minute waiting period
         start_time = time.time()
         timeout = 120  # 2 minutes
         channel_ready = False
         
-        self.LOGGER(__name__).info(f"⏳ Waiting for admin access to channel ID: {CHANNEL_ID}")
-        self.LOGGER(__name__).info("Please make the bot admin in the channel within 2 minutes...")
+        self.LOGGER(__name__).info(f"⏳ Waiting for admin access to DB channel ID: {CHANNEL_ID}")
+        self.LOGGER(__name__).info("Please make the bot admin in the DB channel within 2 minutes...")
         
         while time.time() - start_time < timeout:
             try:
@@ -73,11 +58,11 @@ class Bot(Client):
                 self.LOGGER(__name__).info("✅ Successfully accessed DB Channel!")
                 break
             except Exception as e:
-                self.LOGGER(__name__).warning(f"⏳ Waiting for admin privileges... ({int(timeout - (time.time() - start_time))}s left)")
+                self.LOGGER(__name__).warning(f"⏳ Waiting for DB channel admin privileges... ({int(timeout - (time.time() - start_time))}s left)")
                 await asyncio.sleep(10)  # Check every 10 seconds
         
         if not channel_ready:
-            self.LOGGER(__name__).error(f"❌ Failed to access channel {CHANNEL_ID} after 2 minutes")
+            self.LOGGER(__name__).error(f"❌ Failed to access DB channel {CHANNEL_ID} after 2 minutes")
             self.LOGGER(__name__).error("Please ensure:")
             self.LOGGER(__name__).error("1. Bot is admin in the channel")
             self.LOGGER(__name__).error("2. CHANNEL_ID is correct")
@@ -85,8 +70,51 @@ class Bot(Client):
             self.LOGGER(__name__).info("\nBot stopped. Join https://t.me/CodeXBotzSupport for support")
             sys.exit(1)
 
+        # Force Sub Channel access with 2-minute waiting period
+        if FORCE_SUB_CHANNEL and FORCE_SUB_CHANNEL != 0:
+            start_time = time.time()
+            timeout = 120  # 2 minutes
+            force_sub_ready = False
+            
+            self.LOGGER(__name__).info(f"⏳ Waiting for admin access to force sub channel ID: {FORCE_SUB_CHANNEL}")
+            self.LOGGER(__name__).info("Please make the bot admin in the force sub channel within 2 minutes...")
+            
+            while time.time() - start_time < timeout:
+                try:
+                    force_chat = await self.get_chat(FORCE_SUB_CHANNEL)
+                    
+                    # Try to get or create invite link
+                    try:
+                        link = force_chat.invite_link
+                        if not link:
+                            link = await self.export_chat_invite_link(FORCE_SUB_CHANNEL)
+                    except:
+                        link = None
+                    
+                    if link:
+                        self.invitelink = link
+                        force_sub_ready = True
+                        self.LOGGER(__name__).info(f"✅ Successfully accessed Force Sub Channel: {force_chat.title}!")
+                        break
+                except Exception as e:
+                    self.LOGGER(__name__).warning(f"⏳ Waiting for force sub channel admin privileges... ({int(timeout - (time.time() - start_time))}s left)")
+                    await asyncio.sleep(10)  # Check every 10 seconds
+            
+            if not force_sub_ready:
+                self.LOGGER(__name__).error(f"❌ Failed to access force sub channel {FORCE_SUB_CHANNEL} after 2 minutes")
+                self.LOGGER(__name__).error("Please ensure:")
+                self.LOGGER(__name__).error("1. Bot is admin in the force sub channel")
+                self.LOGGER(__name__).error("2. FORCE_SUB_CHANNEL is correct")
+                self.LOGGER(__name__).error("3. Channel exists and bot is added")
+                self.LOGGER(__name__).info("\nBot stopped. Join https://t.me/CodeXBotzSupport for support")
+                sys.exit(1)
+
         self.set_parse_mode(ParseMode.HTML)
         self.LOGGER(__name__).info(f"🤖 Bot Running! DB Channel: {self.db_channel.title} (ID: {self.db_channel.id})")
+        
+        if FORCE_SUB_CHANNEL:
+            self.LOGGER(__name__).info(f"🔒 Force Sub Enabled: {self.invitelink}")
+        
         print(ascii_art)
         print("""🚀 Welcome to File Sharing Bot""")
         self.username = usr_bot_me.username
